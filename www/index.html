@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voter Search</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1c2030;--mu:#6b7186;--pri:#3b5bdb;--pri-t:#fff;--bd:#e3e6ef;--warn:#c92a2a;--ok:#2b8a3e;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--card:#1c2030;--tx:#eceef6;--mu:#98a0b8;--pri:#748ffc;--pri-t:#12141c;--bd:#2c3248;--warn:#ff8787;--ok:#69db7c;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12141c;--card:#1c2030;--tx:#eceef6;--mu:#98a0b8;--pri:#748ffc;--pri-t:#12141c;--bd:#2c3248;--warn:#ff8787;--ok:#69db7c;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Telugu",sans-serif}
+#app{max-width:640px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+header{padding:14px 16px 8px;font-size:20px;font-weight:700}
+header small{display:block;font-size:12px;font-weight:400;color:var(--mu)}
+main{flex:1;overflow-y:auto;padding:0 12px 12px}
+nav{display:flex;border-top:1px solid var(--bd);background:var(--card)}
+nav button{flex:1;padding:10px 4px;border:0;background:none;color:var(--mu);font:inherit;font-size:12px}
+nav button.on{color:var(--pri);font-weight:700}
+nav button span{display:block;font-size:20px}
+input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx);font:inherit}
+.row{display:flex;gap:8px;margin:8px 0}.row>*{flex:1;min-width:0}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin:8px 0}
+.card.tap{cursor:pointer}
+.nm{font-weight:600;font-size:16px}.mu{color:var(--mu);font-size:13px}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--bd);font-size:12px;margin:4px 4px 0 0;color:var(--mu)}
+.tag.w{color:var(--warn);border-color:var(--warn)}
+.btn{padding:11px 14px;border:0;border-radius:10px;background:var(--pri);color:var(--pri-t);font:inherit;font-weight:600}
+.btn.g{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+.epic{font-family:ui-monospace,Menlo,monospace;letter-spacing:.5px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:5}
+.sheet>div{background:var(--bg);width:100%;max-width:640px;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:85%;overflow:auto}
+dl{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;margin:12px 0}dt{color:var(--mu)}dd{margin:0;font-weight:500}
+h3{margin:14px 4px 4px;font-size:14px;color:var(--mu)}
+</style>
+</head>
+<body>
+<div id="app">
+<header>Voter Search<small id="sub"></small></header>
+<main id="main"></main>
+<nav id="nav"></nav>
+</div>
+<script>
+(function(){
+var KEY="voter_search_v1",mem=[],tab="search",q={t:"",ward:"",g:"",a1:"",a2:""};
+function load(){try{var s=localStorage.getItem(KEY);if(s)return JSON.parse(s)}catch(e){}return mem}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(V))}catch(e){mem=V}}
+var V=load();
+var $=function(i){return document.getElementById(i)};
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+
+// ---- data quality flags
+function flags(){
+  var ec={},sr={};
+  V.forEach(function(v){var e=(v.epic||"").toUpperCase();if(e)ec[e]=(ec[e]||0)+1;var k=v.ward+"|"+v.serial;sr[k]=(sr[k]||0)+1});
+  V.forEach(function(v){
+    var f=[],e=(v.epic||"").toUpperCase(),a=+v.age;
+    if(!/^[A-Z]{3}\d{7}$/.test(e))f.push("EPIC format looks wrong");
+    if(e&&ec[e]>1)f.push("Duplicate EPIC");
+    if(v.serial&&sr[v.ward+"|"+v.serial]>1)f.push("Duplicate serial");
+    if(!(a>=18&&a<=110))f.push("Age doubtful");
+    if(!/^(m|f|male|female|o|other)$/i.test(v.gender||""))f.push("Gender doubtful");
+    if(!v.house)f.push("House no. doubtful");
+    v.f=f;
+  });
+}
+function wards(){var m={};V.forEach(function(v){m[v.ward||"—"]=(m[v.ward||"—"]||0)+1});return m}
+function results(){
+  var t=q.t.trim().toLowerCase();
+  return V.filter(function(v){
+    if(q.ward&&(v.ward||"—")!==q.ward)return false;
+    if(q.g&&(v.gender||"")[0].toUpperCase()!==q.g)return false;
+    if(q.a1&&+v.age<+q.a1)return false;
+    if(q.a2&&+v.age>+q.a2)return false;
+    if(!t)return true;
+    return [v.name,v.epic,v.relName,v.house,v.serial].join(" ").toLowerCase().indexOf(t)>-1;
+  });
+}
+function card(v,i){
+  return '<div class="card tap" data-i="'+i+'"><div class="nm">'+esc(v.name)+'</div>'+
+  '<div class="mu">'+esc(v.rel||"Father/Husband")+': '+esc(v.relName)+'</div>'+
+  '<div class="mu epic">'+esc(v.epic)+'</div>'+
+  '<span class="tag">Ward '+esc(v.ward||"—")+'</span><span class="tag">Sl. '+esc(v.serial)+'</span><span class="tag">House '+esc(v.house||"—")+'</span><span class="tag">'+esc(v.gender)+', '+esc(v.age)+'</span>'+
+  (v.f&&v.f.length?'<span class="tag w">⚠ '+v.f.length+' flag'+(v.f.length>1?"s":"")+'</span>':"")+'</div>';
+}
+
+// ---- views
+function vSearch(){
+  var ws=Object.keys(wards()).sort(),R=results(),shown=R.slice(0,100);
+  return '<input id="qt" placeholder="Search name, EPIC, house no., relative…" value="'+esc(q.t)+'" autocomplete="off">'+
+  '<div class="row"><select id="qw"><option value="">All wards</option>'+ws.map(function(w){return'<option'+(q.ward===w?" selected":"")+'>'+esc(w)+'</option>'}).join("")+'</select>'+
+  '<select id="qg"><option value="">Gender</option><option value="M"'+(q.g==="M"?" selected":"")+'>Male</option><option value="F"'+(q.g==="F"?" selected":"")+'>Female</option></select></div>'+
+  '<div class="row"><input id="qa1" type="number" inputmode="numeric" placeholder="Age from" value="'+esc(q.a1)+'"><input id="qa2" type="number" inputmode="numeric" placeholder="Age to" value="'+esc(q.a2)+'"></div>'+
+  '<div class="row" style="align-items:center"><div class="mu">Found: '+R.length+(R.length>100?" (showing 100)":"")+'</div><button class="btn g" id="exp" style="flex:0 0 auto">Export CSV</button></div>'+
+  '<div id="list">'+(V.length?shown.map(function(v){return card(v,V.indexOf(v))}).join("")||'<div class="card mu">No voters match.</div>':'<div class="card mu">No data yet. Open the Import tab to add a voter list or load sample data.</div>')+'</div>';
+}
+function vWards(){
+  var w=wards(),ks=Object.keys(w).sort();
+  return '<h3>WARDS</h3>'+(ks.map(function(k){return'<div class="card tap" data-w="'+esc(k)+'"><b>Ward '+esc(k)+'</b><div class="mu">'+w[k]+' voters</div></div>'}).join("")||'<div class="card mu">No data yet.</div>');
+}
+function vFlags(){
+  var F=V.filter(function(v){return v.f&&v.f.length});
+  return '<h3>FLAGGED RECORDS ('+F.length+')</h3>'+(F.slice(0,150).map(function(v){return'<div class="card tap" data-i="'+V.indexOf(v)+'"><div class="nm">'+esc(v.name)+'</div><div class="mu epic">'+esc(v.epic)+'</div>'+v.f.map(function(x){return'<span class="tag w">'+esc(x)+'</span>'}).join("")+'</div>'}).join("")||'<div class="card mu">No issues found.</div>');
+}
+function vImport(){
+  return '<h3>IMPORT VOTER LIST</h3><div class="card"><div class="mu">Paste CSV or choose a .csv file. First row must be a header with: serial, epic, name, relation, relative_name, house, age, gender, ward.</div>'+
+  '<textarea id="csv" rows="6" style="margin:8px 0" placeholder="serial,epic,name,relation,relative_name,house,age,gender,ward"></textarea>'+
+  '<input type="file" id="file" accept=".csv,text/csv"><div class="row"><button class="btn" id="imp">Import</button><button class="btn g" id="smp">Load sample</button></div></div>'+
+  '<div class="card"><div class="mu">'+V.length+' records stored on this device only.</div><button class="btn g" id="clr" style="margin-top:8px">Delete all records</button></div>';
+}
+function parseCSV(s){
+  var rows=[],r=[],c="",inq=false;
+  for(var i=0;i<s.length;i++){var ch=s[i];
+    if(inq){if(ch=='"'){if(s[i+1]=='"'){c+='"';i++}else inq=false}else c+=ch}
+    else if(ch=='"')inq=true;else if(ch==","){r.push(c);c=""}
+    else if(ch=="\n"||ch=="\r"){if(ch=="\r"&&s[i+1]=="\n")i++;r.push(c);c="";if(r.join("")!=="")rows.push(r);r=[]}
+    else c+=ch}
+  r.push(c);if(r.join("")!=="")rows.push(r);return rows;
+}
+function doImport(txt){
+  var rows=parseCSV(txt);if(rows.length<2)return alert("No rows found.");
+  var h=rows[0].map(function(x){return x.trim().toLowerCase().replace(/[^a-z]/g,"")}),ix=function(n){return h.indexOf(n)};
+  var m={serial:ix("serial"),epic:ix("epic"),name:ix("name"),rel:ix("relation"),relName:ix("relativename"),house:ix("house"),age:ix("age"),gender:ix("gender"),ward:ix("ward")};
+  if(m.name<0)return alert("Header must include a 'name' column.");
+  rows.slice(1).forEach(function(r){var g=function(k){return m[k]>-1?(r[m[k]]||"").trim():""};
+    V.push({serial:g("serial"),epic:g("epic").toUpperCase(),name:g("name"),rel:g("rel"),relName:g("relName"),house:g("house"),age:g("age"),gender:g("gender"),ward:g("ward")})});
+  save();flags();tab="search";render();
+}
+function sample(){
+  var fn=["Ramesh","Suresh","Lakshmi","Padma","Venkat","Sita","Ravi","Anusha","Krishna","Madhavi","Srinivas","Rani"],ln=["Reddy","Naidu","Rao","Sharma","Varma","Kumar"],out=["serial,epic,name,relation,relative_name,house,age,gender,ward"];
+  for(var i=0;i<60;i++){var g=i%2?"F":"M";
+    out.push([i%30+1,"XYZ"+String(1000000+i*37),fn[i%12]+" "+ln[i%6],g=="F"?"Husband":"Father",fn[(i+5)%12]+" "+ln[i%6],(i%9+1)+"-"+(i%20+1),18+(i*7)%70,g,"W"+(i%3+1)].join(","))}
+  out.push("3,XYZ10000,Test Flagged,Father,Someone,,150,X,W1");
+  doImport(out.join("\n"));
+}
+function detail(v){
+  var d=document.createElement("div");d.className="sheet";
+  var share=v.name+"\nEPIC: "+v.epic+"\n"+(v.rel||"Father/Husband")+": "+v.relName+"\nWard "+v.ward+", Sl. "+v.serial+", House "+v.house;
+  d.innerHTML='<div><div class="nm" style="font-size:20px">'+esc(v.name)+'</div><div class="mu epic">'+esc(v.epic)+'</div>'+
+  '<dl><dt>'+esc(v.rel||"Father/Husband")+'</dt><dd>'+esc(v.relName)+'</dd><dt>House no.</dt><dd>'+esc(v.house||"—")+'</dd><dt>Age / Gender</dt><dd>'+esc(v.age)+' / '+esc(v.gender)+'</dd><dt>Ward</dt><dd>'+esc(v.ward||"—")+'</dd><dt>Serial</dt><dd>'+esc(v.serial)+'</dd></dl>'+
+  (v.f&&v.f.length?v.f.map(function(x){return'<span class="tag w">⚠ '+esc(x)+'</span>'}).join(""):'<span class="tag" style="color:var(--ok)">✓ No issues</span>')+
+  '<div class="row" style="margin-top:14px"><button class="btn" id="cp">Copy EPIC</button><button class="btn g" id="sh">Share</button><button class="btn g" id="cl">Close</button></div></div>';
+  document.body.appendChild(d);
+  d.onclick=function(e){if(e.target===d)d.remove()};
+  d.querySelector("#cl").onclick=function(){d.remove()};
+  d.querySelector("#cp").onclick=function(){try{navigator.clipboard.writeText(v.epic);this.textContent="Copied ✓"}catch(e){this.textContent="Copy failed"}};
+  d.querySelector("#sh").onclick=function(){try{if(navigator.share)navigator.share({text:share});else{navigator.clipboard.writeText(share);this.textContent="Copied ✓"}}catch(e){}};
+}
+function exportCSV(){
+  var R=results(),c=function(x){return'"'+String(x==null?"":x).replace(/"/g,'""')+'"'};
+  var s="serial,epic,name,relation,relative_name,house,age,gender,ward\n"+R.map(function(v){return[v.serial,v.epic,v.name,v.rel,v.relName,v.house,v.age,v.gender,v.ward].map(c).join(",")}).join("\n");
+  try{navigator.clipboard.writeText(s);alert(R.length+" rows copied to clipboard as CSV.")}catch(e){alert("Clipboard unavailable.")}
+}
+
+// ---- render + events
+var T=[["search","🔍","Search"],["wards","🏘","Wards"],["flags","⚠️","Flags"],["import","📥","Import"]];
+function render(){
+  $("sub").textContent=V.length+" voters · "+Object.keys(wards()).length+" wards";
+  $("nav").innerHTML=T.map(function(t){return'<button data-t="'+t[0]+'" class="'+(tab===t[0]?"on":"")+'"><span>'+t[1]+'</span>'+t[2]+'</button>'}).join("");
+  var m=$("main");m.innerHTML=({search:vSearch,wards:vWards,flags:vFlags,import:vImport})[tab]();
+  if(tab==="search"){
+    var qt=$("qt");
+    qt.oninput=function(){q.t=qt.value;$("list").innerHTML=V.length?results().slice(0,100).map(function(v){return card(v,V.indexOf(v))}).join("")||'<div class="card mu">No voters match.</div>':"";};
+    $("qw").onchange=function(){q.ward=this.value;render()};$("qg").onchange=function(){q.g=this.value;render()};
+    $("qa1").onchange=function(){q.a1=this.value;render()};$("qa2").onchange=function(){q.a2=this.value;render()};
+    $("exp").onclick=exportCSV;
+  }
+  if(tab==="import"){
+    $("imp").onclick=function(){doImport($("csv").value)};$("smp").onclick=sample;
+    $("clr").onclick=function(){if(confirm("Delete all records on this device?")){V=[];save();render()}};
+    $("file").onchange=function(){var f=this.files[0];if(!f)return;var r=new FileReader();r.onload=function(){doImport(r.result)};r.readAsText(f)};
+  }
+}
+$("nav").onclick=function(e){var b=e.target.closest("button");if(b){tab=b.dataset.t;render()}};
+$("main").onclick=function(e){var c=e.target.closest(".card.tap");if(!c)return;
+  if(c.dataset.w!==undefined){q.ward=c.dataset.w;tab="search";render()}else if(c.dataset.i!==undefined)detail(V[+c.dataset.i])};
+flags();render();
+})();
+</script>
+</body>
+</html>
